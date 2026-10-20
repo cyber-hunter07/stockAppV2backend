@@ -6,6 +6,12 @@ const quotationItemSchema = new mongoose.Schema({
   remarks: { type: String, default: "" },
 }, { _id: false });
 
+const attachmentSchema = new mongoose.Schema({
+  name: { type: String, default: "" },
+  mimeType: { type: String, default: "" },
+  dataUrl: { type: String, default: "" },
+}, { _id: false });
+
 const quotationSchema = new mongoose.Schema({
   reference: { type: String, unique: true },
   vendor: { type: mongoose.Schema.Types.ObjectId, ref: "Vendor", required: true },
@@ -16,6 +22,7 @@ const quotationSchema = new mongoose.Schema({
   deliveryTerms: { type: String, default: "" },
   warrantyExpected: { type: String, default: "" },
   additionalNotes: { type: String, default: "" },
+  billAttachment: { type: attachmentSchema, default: undefined },
   status: { type: String, enum: ["pending", "received", "closed"], default: "pending" },
 }, { timestamps: true });
 module.exports = mongoose.model("QuotationRequest", quotationSchema);

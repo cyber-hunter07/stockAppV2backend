@@ -13,6 +13,22 @@ const dateIsValid = (value) => {
   const parsed = new Date(`${value}T00:00:00.000Z`);
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 };
+const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024;
+const ATTACHMENT_TYPES = new Set(["application/pdf", "image/jpeg", "image/png", "image/webp"]);
+function cleanAttachment(value, label) {
+  if (value === undefined || value === null || value === "") return undefined;
+  const name = String(value.name || "").trim().slice(0, 180);
+  const mimeType = String(value.mimeType || "").trim().toLowerCase();
+  const dataUrl = String(value.dataUrl || "");
+  if (!name || !ATTACHMENT_TYPES.has(mimeType) || !dataUrl.startsWith(`data:${mimeType};base64,`)) {
+    const error = new Error(`${label} must be a PDF, JPG, PNG, or WebP file.`); error.status = 400; throw error;
+  }
+  const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+  if (!base64 || Buffer.byteLength(base64, "base64") > MAX_ATTACHMENT_BYTES) {
+    const error = new Error(`${label} must be 2 MB or smaller.`); error.status = 400; throw error;
+  }
+  return { name, mimeType, dataUrl };
+}
 
 router.get("/api/quotations", authenticate, async (req, res) => {
   res.json(await QuotationRequest.find().populate("vendor", "companyName").sort({ createdAt: -1 }));
@@ -44,11 +60,12 @@ router.post("/api/quotations", authenticate, canEdit, async (req, res) => {
     if (!await Vendor.exists({ _id: vendorId })) return res.status(404).json({ error: "Vendor not found." });
     const year = new Date(`${requestDate}T00:00:00`).getFullYear();
     const count = await QuotationRequest.countDocuments({ requestDate: { $gte: new Date(`${year}-01-01T00:00:00`), $lt: new Date(`${year + 1}-01-01T00:00:00`) } });
+    const billAttachment = cleanAttachment(req.body.billAttachment, "Bill attachment");
     const request = await QuotationRequest.create({
       reference: `QR-${year}-${String(count + 1).padStart(4, "0")}`, vendor: vendorId,
       requestDate: new Date(`${requestDate}T00:00:00`), replyRequiredBy: req.body.replyRequiredBy ? new Date(`${req.body.replyRequiredBy}T00:00:00`) : undefined,
       items, paymentTerms: String(req.body.paymentTerms || "").trim().slice(0, 500), deliveryTerms: String(req.body.deliveryTerms || "").trim().slice(0, 500),
-      warrantyExpected: String(req.body.warrantyExpected || "").trim().slice(0, 500), additionalNotes: String(req.body.additionalNotes || "").trim(),
+      warrantyExpected: String(req.body.warrantyExpected || "").trim().slice(0, 500), additionalNotes: String(req.body.additionalNotes || "").trim(), billAttachment,
     });
     await AuditLog.create({ action: "QUOTATION_CREATED", entity: "QuotationRequest", entityId: request._id, performedBy: req.user.email, details: `Created ${request.reference}` });
     res.status(201).json(request);
@@ -73,6 +90,7 @@ router.put("/api/quotations/:id", authenticate, canEdit, async (req, res) => {
       changes.items = items;
     }
     if (req.body.additionalNotes !== undefined) changes.additionalNotes = String(req.body.additionalNotes).trim().slice(0, 2000);
+    if (req.body.billAttachment !== undefined) changes.billAttachment = cleanAttachment(req.body.billAttachment, "Bill attachment");
     const request = await QuotationRequest.findByIdAndUpdate(req.params.id, changes, { new: true, runValidators: true }).populate("vendor", "companyName");
     if (!request) return res.status(404).json({ error: "Quotation request not found." });
     await AuditLog.create({ action: "QUOTATION_UPDATED", entity: "QuotationRequest", entityId: request._id, performedBy: req.user.email, details: `${request.reference}: ${request.status}` });

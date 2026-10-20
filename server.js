@@ -95,7 +95,7 @@ mongoose
     scheduleBackups();
     scheduleAlertChecks();
   })
-  .catch((err) => console.error("MongoDB connection failed:", err.name || "Error"));
+  .catch((err) => console.error("MongoDB connection failed:", err.name || "Error", err.message || "No additional error details."));
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

@@ -181,6 +181,14 @@ router.put("/api/company-profile", authenticate, authorize("Administrator"), asy
   try {
     const changes = {};
     for (const field of ["name", "subtitle", "orgCode", "address", "phone", "email"]) if (req.body[field] !== undefined) changes[field] = String(req.body[field]).trim();
+    for (const field of ["principalSignature", "hodSignature"]) {
+      if (req.body[field] === undefined) continue;
+      const dataUrl = String(req.body[field] || "");
+      if (dataUrl && (!/^data:image\/(png|jpeg|webp);base64,/.test(dataUrl) || Buffer.byteLength(dataUrl.slice(dataUrl.indexOf(",") + 1), "base64") > 1024 * 1024)) {
+        return res.status(400).json({ error: "Signatures must be PNG, JPG, or WebP images of 1 MB or smaller." });
+      }
+      changes[field] = dataUrl;
+    }
     if (changes.name !== undefined && !changes.name) return res.status(400).json({ error: "Institute name is required." });
     if (changes.orgCode !== undefined && !/^[A-Z0-9-]{2,8}$/.test(changes.orgCode.toUpperCase())) return res.status(400).json({ error: "Asset prefix must contain 2–8 letters, numbers, or hyphens." });
     if (changes.orgCode) changes.orgCode = changes.orgCode.toUpperCase();

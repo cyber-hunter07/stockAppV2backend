@@ -6,5 +6,7 @@ const companyProfileSchema = new mongoose.Schema({
   address: { type: String, default: "" },
   phone: { type: String, default: "" },
   email: { type: String, default: "" },
+  principalSignature: { type: String, default: "" },
+  hodSignature: { type: String, default: "" },
 }, { timestamps: true });
 module.exports = mongoose.model("CompanyProfile", companyProfileSchema);

@@ -14,6 +14,23 @@ const { sendApiError } = require("../utils/apiErrors");
 const { withMongoTransaction } = require("../utils/mongoTransaction");
 const { authenticate, authorize } = require("../middleware/auth");
 const canEdit = authorize("Administrator", "Store Manager");
+const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024;
+const ATTACHMENT_TYPES = new Set(["application/pdf", "image/jpeg", "image/png", "image/webp"]);
+function cleanCertificateAttachment(value) {
+  if (value === undefined || value === null || value === "") return undefined;
+  const name = String(value.name || "").trim().slice(0, 180);
+  const mimeType = String(value.mimeType || "").trim().toLowerCase();
+  const dataUrl = String(value.dataUrl || "");
+  if (!name || !ATTACHMENT_TYPES.has(mimeType) || !dataUrl.startsWith(`data:${mimeType};base64,`)) {
+    const error = new Error("Certificate must be a PDF, JPG, PNG, or WebP file."); error.status = 400; throw error;
+  }
+  const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+  if (!base64 || Buffer.byteLength(base64, "base64") > MAX_ATTACHMENT_BYTES) {
+    const error = new Error("Certificate must be 2 MB or smaller."); error.status = 400; throw error;
+  }
+  return { name, mimeType, dataUrl };
+}
+
 
 // GET /api/asset-codes - full register, with filters
 router.get("/api/asset-codes", authenticate, async (req, res) => {
@@ -175,7 +192,8 @@ async function createScrapRequest(req, res) {
   const pending = await ScrapRequest.exists({ status: "pending", assetCodes: { $in: ids } });
   if (pending) return res.status(409).json({ error: "At least one selected asset already has a pending scrap request." });
   try {
-    const request = await ScrapRequest.create({ assetCodes: ids, reason, requestedBy: req.user.email });
+    const certificateAttachment = cleanCertificateAttachment(req.body.certificateAttachment);
+    const request = await ScrapRequest.create({ assetCodes: ids, reason, certificateAttachment, requestedBy: req.user.email });
     await AuditLog.create({ action: "SCRAP_REQUESTED", entity: "ScrapRequest", entityId: request._id, performedBy: req.user.email, details: `${ids.length} asset(s) submitted for scrap approval` });
     res.status(201).json(request);
   } catch (err) { sendApiError(res, err, "Could not submit the scrap request."); }
