@@ -7,10 +7,17 @@ const purchaseItemSchema = new mongoose.Schema({
   gstPercent: { type: Number, default: 18 },
 }, { _id: false });
 
+const attachmentSchema = new mongoose.Schema({
+  name: { type: String, default: "" },
+  mimeType: { type: String, default: "" },
+  dataUrl: { type: String, default: "" },
+}, { _id: false });
+
 const purchaseSchema = new mongoose.Schema({
   purchaseDate: { type: Date, required: true },
   invoiceNumber: { type: String, default: "" },
   invoicePdfUrl: { type: String, default: "" },
+  billAttachment: { type: attachmentSchema, default: undefined },
   vendor: { type: mongoose.Schema.Types.ObjectId, ref: "Vendor" },
   items: [purchaseItemSchema],
   taxableTotal: { type: Number, default: 0 },

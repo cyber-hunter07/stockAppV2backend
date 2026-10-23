@@ -174,6 +174,17 @@ router.post("/api/stock-move", authenticate, canEdit, async (req, res) => {
   return completeMovement(req, res, { type: "stock_move", allowedStatuses: ["in_store", "issued", "transferred"], nextStatus: "issued", requireReason: true });
 });
 
+router.get("/api/scrap/requests/:id/certificate", authenticate, async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: "Invalid scrap request id." });
+  const request = await ScrapRequest.findById(req.params.id).select("certificateAttachment");
+  if (!request) return res.status(404).json({ error: "Scrap request not found." });
+  const attachment = request.certificateAttachment;
+  if (!attachment?.dataUrl || !attachment.mimeType) return res.status(404).json({ error: "No certificate is attached to this request." });
+  const base64 = attachment.dataUrl.slice(attachment.dataUrl.indexOf(",") + 1);
+  res.set({ "Content-Type": attachment.mimeType, "Content-Disposition": `inline; filename="${String(attachment.name || "certificate").replace(/[\\"]/g, "_")}"`, "Cache-Control": "private, max-age=300" });
+  return res.send(Buffer.from(base64, "base64"));
+});
+
 router.get("/api/scrap/requests", authenticate, async (req, res) => {
   const filter = {};
   if (req.query.status && ["pending", "approved", "rejected"].includes(req.query.status)) filter.status = req.query.status;

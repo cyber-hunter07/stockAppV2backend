@@ -14,6 +14,29 @@ const { authenticate, authorize } = require("../middleware/auth");
 const { sendApiError } = require("../utils/apiErrors");
 const { withMongoTransaction } = require("../utils/mongoTransaction");
 const canEdit = authorize("Administrator", "Store Manager");
+const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024;
+const ATTACHMENT_TYPES = new Set(["application/pdf", "image/jpeg", "image/png", "image/webp"]);
+function cleanBillAttachment(value) {
+  if (value === undefined || value === null || value === "") return undefined;
+  const name = String(value.name || "").trim().slice(0, 180);
+  const mimeType = String(value.mimeType || "").trim().toLowerCase();
+  const dataUrl = String(value.dataUrl || "");
+  if (!name || !ATTACHMENT_TYPES.has(mimeType) || !dataUrl.startsWith(`data:${mimeType};base64,`)) {
+    const error = new Error("Purchase bill must be a PDF, JPG, PNG, or WebP file."); error.status = 400; throw error;
+  }
+  const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+  if (!base64 || Buffer.byteLength(base64, "base64") > MAX_ATTACHMENT_BYTES) {
+    const error = new Error("Purchase bill must be 2 MB or smaller."); error.status = 400; throw error;
+  }
+  return { name, mimeType, dataUrl };
+}
+function sendAttachment(res, attachment) {
+  if (!attachment?.dataUrl || !attachment.mimeType) return res.status(404).json({ error: "No document is attached to this record." });
+  const base64 = attachment.dataUrl.slice(attachment.dataUrl.indexOf(",") + 1);
+  res.set({ "Content-Type": attachment.mimeType, "Content-Disposition": `inline; filename="${String(attachment.name || "document").replace(/[\\"]/g, "_")}"`, "Cache-Control": "private, max-age=300" });
+  return res.send(Buffer.from(base64, "base64"));
+}
+
 
 function validPurchaseDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "")) && !Number.isNaN(new Date(`${value}T00:00:00`).getTime());
@@ -27,12 +50,21 @@ router.get("/api/purchases", authenticate, async (req, res) => {
   res.json(purchases);
 });
 
+router.get("/api/purchases/:id/bill", authenticate, async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: "Invalid purchase id." });
+  const purchase = await Purchase.findById(req.params.id).select("billAttachment");
+  if (!purchase) return res.status(404).json({ error: "Purchase not found." });
+  return sendAttachment(res, purchase.billAttachment);
+});
+
 router.post("/api/purchases", authenticate, canEdit, async (req, res) => {
   const { purchaseDate, invoiceNumber = "", vendor, items, notes = "" } = req.body;
   if (!validPurchaseDate(purchaseDate)) return res.status(400).json({ error: "Enter a valid purchase date." });
   if (!Array.isArray(items) || items.length < 1 || items.length > 100) return res.status(400).json({ error: "Add between 1 and 100 purchase lines." });
   if (vendor && !mongoose.isValidObjectId(vendor)) return res.status(400).json({ error: "Choose a valid vendor." });
   if (String(invoiceNumber).length > 100 || String(notes).length > 1000) return res.status(400).json({ error: "Invoice number or notes are too long." });
+  let billAttachment;
+  try { billAttachment = cleanBillAttachment(req.body.billAttachment); } catch (error) { return res.status(error.status || 400).json({ error: error.message }); }
 
   const cleanItems = [];
   let units = 0;
@@ -71,7 +103,7 @@ router.post("/api/purchases", authenticate, canEdit, async (req, res) => {
       }
       const [purchase] = await Purchase.create([{
         purchaseDate: date, invoiceNumber: String(invoiceNumber).trim(), vendor: vendor || undefined,
-        items: cleanItems, notes: String(notes).trim(), taxableTotal, gstTotal,
+        items: cleanItems, notes: String(notes).trim(), billAttachment, taxableTotal, gstTotal,
         grandTotal: taxableTotal + gstTotal, createdBy: req.user.email,
       }], { session });
 
